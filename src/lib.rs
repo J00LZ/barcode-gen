@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, fmt::Display, sync::atomic::AtomicUsize};
 
+/// The different barcode types, used to keep track of the type used in the encoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarcodeType {
     CodeA,
@@ -7,6 +8,8 @@ pub enum BarcodeType {
     CodeC,
 }
 
+/// A value in a barcode, consists of regular characters,
+/// digits for Code C, and control codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarcodeValue {
     RegularCharacter(char),
@@ -38,6 +41,7 @@ impl From<u8> for BarcodeValue {
     }
 }
 
+/// An entry in the encoding table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TableEntry {
     value: u8,
@@ -48,6 +52,7 @@ pub struct TableEntry {
 }
 
 impl TableEntry {
+    /// create a new table entry
     pub fn new(
         value: u8,
         a: impl Into<BarcodeValue>,
@@ -84,21 +89,149 @@ impl TableEntry {
         )
     }
 
+    /// the value of the entry, used for calculating the check digit
     pub fn value(&self) -> u8 {
         self.value
     }
 
+    /// the most common character used to represent this value
     pub fn latin(&self) -> char {
         self.latin
     }
+
+    /// the bits used to encode the value on a normal barcode
+    pub fn barcode_bits(&self) -> u32 {
+        BARCODE_BITS[self.value() as usize].0
+    }
+
+    /// the runs for the code
+    ///
+    /// A run of 1231 would mean 1001110 in binary
+    pub fn barcode_runs(&self) -> &'static str {
+        BARCODE_BITS[self.value() as usize].1
+    }
 }
 
-#[derive(Debug)]
+const BARCODE_BITS: [(u32, &str); 109] = [
+    (0b11011001100, "212222"),
+    (0b11001101100, "222122"),
+    (0b11001100110, "222221"),
+    (0b10010011000, "121223"),
+    (0b10010001100, "121322"),
+    (0b10001001100, "131222"),
+    (0b10011001000, "122213"),
+    (0b10011000100, "122312"),
+    (0b10001100100, "132212"),
+    (0b11001001000, "221213"),
+    (0b11001000100, "221312"),
+    (0b11000100100, "231212"),
+    (0b10110011100, "112232"),
+    (0b10011011100, "122132"),
+    (0b10011001110, "122231"),
+    (0b10111001100, "113222"),
+    (0b10011101100, "123122"),
+    (0b10011100110, "123221"),
+    (0b11001110010, "223211"),
+    (0b11001011100, "221132"),
+    (0b11001001110, "221231"),
+    (0b11011100100, "213212"),
+    (0b11001110100, "223112"),
+    (0b11101101110, "312131"),
+    (0b11101001100, "311222"),
+    (0b11100101100, "321122"),
+    (0b11100100110, "321221"),
+    (0b11101100100, "312212"),
+    (0b11100110100, "322112"),
+    (0b11100110010, "322211"),
+    (0b11011011000, "212123"),
+    (0b11011000110, "212321"),
+    (0b11000110110, "232121"),
+    (0b10100011000, "111323"),
+    (0b10001011000, "131123"),
+    (0b10001000110, "131321"),
+    (0b10110001000, "112313"),
+    (0b10001101000, "132113"),
+    (0b10001100010, "132311"),
+    (0b11010001000, "211313"),
+    (0b11000101000, "231113"),
+    (0b11000100010, "231311"),
+    (0b10110111000, "112133"),
+    (0b10110001110, "112331"),
+    (0b10001101110, "132131"),
+    (0b10111011000, "113123"),
+    (0b10111000110, "113321"),
+    (0b10001110110, "133121"),
+    (0b11101110110, "313121"),
+    (0b11010001110, "211331"),
+    (0b11000101110, "231131"),
+    (0b11011101000, "213113"),
+    (0b11011100010, "213311"),
+    (0b11011101110, "213131"),
+    (0b11101011000, "311123"),
+    (0b11101000110, "311321"),
+    (0b11100010110, "331121"),
+    (0b11101101000, "312113"),
+    (0b11101100010, "312311"),
+    (0b11100011010, "332111"),
+    (0b11101111010, "314111"),
+    (0b11001000010, "221411"),
+    (0b11110001010, "431111"),
+    (0b10100110000, "111224"),
+    (0b10100001100, "111422"),
+    (0b10010110000, "121124"),
+    (0b10010000110, "121421"),
+    (0b10000101100, "141122"),
+    (0b10000100110, "141221"),
+    (0b10110010000, "112214"),
+    (0b10110000100, "112412"),
+    (0b10011010000, "122114"),
+    (0b10011000010, "122411"),
+    (0b10000110100, "142112"),
+    (0b10000110010, "142211"),
+    (0b11000010010, "241211"),
+    (0b11001010000, "221114"),
+    (0b11110111010, "413111"),
+    (0b11000010100, "241112"),
+    (0b10001111010, "134111"),
+    (0b10100111100, "111242"),
+    (0b10010111100, "121142"),
+    (0b10010011110, "121241"),
+    (0b10111100100, "114212"),
+    (0b10011110100, "124112"),
+    (0b10011110010, "124211"),
+    (0b11110100100, "411212"),
+    (0b11110010100, "421112"),
+    (0b11110010010, "421211"),
+    (0b11011011110, "212141"),
+    (0b11011110110, "214121"),
+    (0b11110110110, "412121"),
+    (0b10101111000, "111143"),
+    (0b10100011110, "111341"),
+    (0b10001011110, "131141"),
+    (0b10111101000, "114113"),
+    (0b10111100010, "114311"),
+    (0b11110101000, "411113"),
+    (0b11110100010, "411311"),
+    (0b10111011110, "113141"),
+    (0b10111101110, "114131"),
+    (0b11101011110, "311141"),
+    (0b11110101110, "411131"),
+    (0b11010000100, "211412"),
+    (0b11010010000, "211214"),
+    (0b11010011100, "211232"),
+    (0b11000111010, "233111"),
+    (0b11010111000, "211133"),
+    (0b1100011101011, "2331112"),
+];
+
+/// an encoding table, used to encode barcodes.
+#[derive(Debug, Clone)]
 pub struct Table {
     entries: [TableEntry; 107],
 }
 
 impl Table {
+    /// create a new table
     pub const fn new() -> Self {
         Table {
             entries: [
@@ -269,7 +402,7 @@ impl Table {
                     'Í',
                 ),
                 TableEntry::new_barcode_value(
-                    106,
+                    108,
                     BarcodeValue::Stop,
                     BarcodeValue::Stop,
                     BarcodeValue::Stop,
@@ -279,6 +412,29 @@ impl Table {
         }
     }
 
+    /// in case you want to make your own (probably incompatible) table
+    ///
+    /// Use the [`Self::modify`] function to change values in the current table,
+    /// like changing what latin character matches a value
+    pub const fn new_from(entries: [TableEntry; 107]) -> Self {
+        Table { entries }
+    }
+
+    /// Modify a table, allowing you to set custom values for all fields of a table entry. 
+    /// 
+    /// (tip: just make a new table entry and assign it to the parameter)
+    pub fn modify(&self, mut f: impl FnMut(&mut TableEntry)) -> Self {
+        let mut new_entries = self.entries;
+        for entry in &mut new_entries {
+            f(entry);
+        }
+        Table::new_from(new_entries)
+    }
+
+    /// given a requested value and a specific code set, find the value in the table.
+    ///
+    /// It'll return None if the value does not exist in the table, for example when you
+    /// want to use a lower case character but are in Code A.
     pub fn entry_in_set(
         &self,
         value: impl Into<BarcodeValue>,
@@ -293,6 +449,7 @@ impl Table {
     }
 }
 
+/// A completed barcode.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Barcode<'table> {
     code: Vec<&'table TableEntry>,
@@ -319,8 +476,21 @@ impl Display for Barcode<'_> {
         write!(f, "{output}")
     }
 }
-static TABLE: Table = Table::new();
 
+impl<'table> IntoIterator for Barcode<'table> {
+    type Item = &'table TableEntry;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.code.into_iter()
+    }
+}
+
+/// const value of the most common table. 
+pub const TABLE: Table = Table::new();
+
+/// Make a barcode with the fastest available method.
 pub fn make_barcode(text: &str) -> Option<Barcode<'_>> {
     #[cfg(feature = "parallel")]
     let res = make_barcode_custom_table_par(&TABLE, text);
@@ -329,6 +499,8 @@ pub fn make_barcode(text: &str) -> Option<Barcode<'_>> {
     res
 }
 
+/// Make a barcode using a custom table, you can provide [`TABLE`] to
+/// use the normal table. 
 pub fn make_barcode_custom_table<'table>(
     table: &'table Table,
     text: &str,
@@ -360,6 +532,7 @@ pub fn make_barcode_custom_table<'table>(
     done.into_iter().next()
 }
 
+/// like [`make_barcode_custom_table`], but uses [`rayon`] to be up to 10 times faster. 
 #[cfg(feature = "parallel")]
 pub fn make_barcode_custom_table_par<'table>(
     table: &'table Table,
@@ -533,5 +706,3 @@ impl<'table, 's> BarcodeBuilder<'table, 's> {
         Barcode { code: self.code }
     }
 }
-
-
