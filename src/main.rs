@@ -1,3 +1,14 @@
+use std::process::exit;
+
 fn main() {
-    println!("Hello, world!");
+    let text = std::env::args()
+        .skip(1)
+        .fold(String::new(), |acc, c| format!("{acc} {c}"));
+    if text.is_empty() {
+        println!("You might want to add some arguments to encode...");
+        exit(1)
+    }
+    if let Some(code) = barcode_gen::make_barcode(&text) {
+        println!("{code}");
+    }
 }
