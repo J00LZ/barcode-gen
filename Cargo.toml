@@ -2,6 +2,8 @@
 name = "barcode-gen"
 version = "0.1.0"
 edition = "2024"
+description = "A simple Code128 barcode generator"
+license = "MIT"
 
 [dependencies]
 rayon = { version = "1.10.0", optional = true }
