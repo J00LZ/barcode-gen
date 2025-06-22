@@ -1,7 +1,11 @@
-use std::{collections::VecDeque, fmt::Display, sync::atomic::AtomicUsize};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt::Display,
+    sync::atomic::AtomicUsize,
+};
 
 /// The different barcode types, used to keep track of the type used in the encoder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BarcodeType {
     CodeA,
     CodeB,
@@ -420,8 +424,8 @@ impl Table {
         Table { entries }
     }
 
-    /// Modify a table, allowing you to set custom values for all fields of a table entry. 
-    /// 
+    /// Modify a table, allowing you to set custom values for all fields of a table entry.
+    ///
     /// (tip: just make a new table entry and assign it to the parameter)
     pub fn modify(&self, mut f: impl FnMut(&mut TableEntry)) -> Self {
         let mut new_entries = self.entries;
@@ -487,20 +491,16 @@ impl<'table> IntoIterator for Barcode<'table> {
     }
 }
 
-/// const value of the most common table. 
+/// const value of the most common table.
 pub const TABLE: Table = Table::new();
 
-/// Make a barcode with the fastest available method.
+/// Make a barcode with the fastest available method, currently uses [`make_barcode_custom_table_dp`].
 pub fn make_barcode(text: &str) -> Option<Barcode<'_>> {
-    #[cfg(feature = "parallel")]
-    let res = make_barcode_custom_table_par(&TABLE, text);
-    #[cfg(not(feature = "parallel"))]
-    let res = make_barcode_custom_table(&TABLE, text);
-    res
+    make_barcode_custom_table_dp(&TABLE, text)
 }
 
 /// Make a barcode using a custom table, you can provide [`TABLE`] to
-/// use the normal table. 
+/// use the normal table.
 pub fn make_barcode_custom_table<'table>(
     table: &'table Table,
     text: &str,
@@ -532,7 +532,7 @@ pub fn make_barcode_custom_table<'table>(
     done.into_iter().next()
 }
 
-/// like [`make_barcode_custom_table`], but uses [`rayon`] to be up to 10 times faster. 
+/// like [`make_barcode_custom_table`], but uses [`rayon`] to be up to 10 times faster.
 #[cfg(feature = "parallel")]
 pub fn make_barcode_custom_table_par<'table>(
     table: &'table Table,
@@ -552,6 +552,39 @@ pub fn make_barcode_custom_table_par<'table>(
     res.map(|r| r.build())
 }
 
+/// Find a barcode using dynamic programming. It's very fast.
+pub fn make_barcode_custom_table_dp<'table>(
+    table: &'table Table,
+    mut text: &str,
+) -> Option<Barcode<'table>> {
+    let mut map = HashMap::<(&str, BarcodeType), BarcodeBuilder>::new();
+    for c in BarcodeBuilder::new(table, text).create_child_options() {
+        map.insert((c.remaining, c.set), c);
+    }
+
+    while !text.is_empty() {
+        for ty in [BarcodeType::CodeA, BarcodeType::CodeB, BarcodeType::CodeC] {
+            if let Some(builder) = map.get(&(text, ty)) {
+                let options = builder.create_child_options();
+                for option in options {
+                    if let Some(c) = map.get(&(option.remaining, option.set)) {
+                        if c.cost() > option.cost() {
+                            map.insert((option.remaining, option.set), option);
+                        }
+                    } else {
+                        map.insert((option.remaining, option.set), option);
+                    }
+                }
+            }
+        }
+        text = &text[1..];
+    }
+
+    map.into_iter()
+        .filter_map(|((k, _), v)| if k.is_empty() { Some(v.build()) } else { None })
+        .min_by_key(|v| v.code.len())
+}
+
 #[derive(Debug, Clone)]
 struct BarcodeBuilder<'table, 's> {
     table: &'table Table,
@@ -568,6 +601,10 @@ impl<'table, 's> BarcodeBuilder<'table, 's> {
             remaining: code,
             set: BarcodeType::CodeA,
         }
+    }
+
+    fn cost(&self) -> usize {
+        self.code.len()
     }
 
     fn create_child_options(&self) -> Vec<Self> {
@@ -704,5 +741,31 @@ impl<'table, 's> BarcodeBuilder<'table, 's> {
                 .unwrap(),
         );
         Barcode { code: self.code }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::Rng;
+
+    #[test]
+    fn test_equality() {
+        let mut rng = rand::rng();
+        let len = rng.random_range(1..20);
+        let random_string = rng
+            .sample_iter(rand::distr::Alphanumeric)
+            .take(len)
+            .map(|c| c as char)
+            .collect::<String>();
+
+        let code_one = super::make_barcode_custom_table(&super::TABLE, &random_string);
+        #[cfg(feature = "parallel")]
+        let code_two = super::make_barcode_custom_table_par(&super::TABLE, &random_string);
+        let code_three = super::make_barcode_custom_table_dp(&super::TABLE, &random_string);
+        #[cfg(feature = "parallel")]
+        assert_eq!(code_one, code_two);
+        assert_eq!(code_one, code_three);
+        #[cfg(feature = "parallel")]
+        assert_eq!(code_two, code_three);
     }
 }
