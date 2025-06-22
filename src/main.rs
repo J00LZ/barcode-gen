@@ -14,5 +14,7 @@ fn main() {
     }
     if let Some(code) = barcode_gen::make_barcode(&text) {
         println!("{code}");
+    } else {
+        println!("Could not encode the barcode!")
     }
 }

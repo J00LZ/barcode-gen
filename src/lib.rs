@@ -1,7 +1,11 @@
 #![warn(missing_docs)]
-//! A simple Code128 barcode generator
-//! 
-//! Currently supports all features of Code 128 except FNC4 (the code use to allow encoding Latin-1 completely).
+//! A simple Code 128 barcode generator
+//!
+//! Currently supports all features of Code 128.
+//!
+//! Generating barcodes with [`FNC1`](BarcodeValue::FNC1), [`FNC2`](BarcodeValue::FNC2) and [`FNC3`](BarcodeValue::FNC3)
+//! is not possible however, since these are control characters that can't appear in a normal string.
+//! [`FNC4`](BarcodeValue::FNC4) does work however and is switched to when needed automatically.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -20,13 +24,24 @@ pub enum BarcodeType {
     CodeC,
 }
 
+impl BarcodeType {
+    fn other_set(&self) -> Option<Self> {
+        match self {
+            BarcodeType::CodeA => Some(BarcodeType::CodeB),
+            BarcodeType::CodeB => Some(BarcodeType::CodeA),
+            // c is always c
+            BarcodeType::CodeC => None,
+        }
+    }
+}
+
 /// A value in a barcode, consists of regular characters,
 /// digits for Code C, and control codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarcodeValue {
-    /// A regular character, also includes control characters. 
+    /// A regular character, also includes control characters.
     RegularCharacter(char),
-    /// A Code C digit, the numbers 0 through 9 are actually 00 through 09. 
+    /// A Code C digit, the numbers 0 through 9 are actually 00 through 09.
     Digit(u8),
     /// Used to indicate a GS1-128 barcode
     FNC1,
@@ -34,7 +49,7 @@ pub enum BarcodeValue {
     FNC2,
     /// Initialize, used for programming scanners
     FNC3,
-    /// Used for extended ASCII support, currently not available in this crate
+    /// Used for extended ASCII support.
     FNC4,
     /// The code used to signal we start in variant A
     StartA,
@@ -42,7 +57,7 @@ pub enum BarcodeValue {
     StartB,
     /// The code used to signal we start in variant C
     StartC,
-    /// Not actually the stop code, just the one used at the end. 
+    /// Not actually the stop code, just the one used at the end.
     Stop,
     /// Use variant A for the next character
     ShiftA,
@@ -476,6 +491,12 @@ impl Table {
     }
 }
 
+impl Default for Table {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A completed barcode.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Barcode<'table> {
@@ -529,7 +550,7 @@ pub fn make_barcode_custom_table<'table>(
     text: &str,
 ) -> Option<Barcode<'table>> {
     let mut stack = VecDeque::new();
-    stack.push_back(BarcodeBuilder::new(table, text));
+    stack.extend(BarcodeBuilder::new(table, text));
     let mut done = vec![];
 
     let shortest = AtomicUsize::new(usize::MAX);
@@ -542,10 +563,8 @@ pub fn make_barcode_custom_table<'table>(
                 let code = option.build();
                 shortest.fetch_min(code.code.len(), std::sync::atomic::Ordering::SeqCst);
                 done.push(code);
-            } else {
-                if option.code.len() <= shortest.load(std::sync::atomic::Ordering::SeqCst) {
-                    stack.push_back(option);
-                }
+            } else if option.code.len() <= shortest.load(std::sync::atomic::Ordering::SeqCst) {
+                stack.push_back(option);
             }
         }
     }
@@ -580,31 +599,34 @@ pub fn make_barcode_custom_table_dp<'table>(
     table: &'table Table,
     mut text: &str,
 ) -> Option<Barcode<'table>> {
-    let mut map = HashMap::<(&str, BarcodeType), BarcodeBuilder>::new();
-    for c in BarcodeBuilder::new(table, text).create_child_options() {
-        map.insert((c.remaining, c.set), c);
+    let mut map = HashMap::<(&str, BarcodeType, bool), BarcodeBuilder>::new();
+    for c in BarcodeBuilder::new(table, text) {
+        map.insert((c.remaining, c.set, c.fnc4), c);
     }
 
     while !text.is_empty() {
+        let next_char = text.chars().next().unwrap().len_utf8();
         for ty in [BarcodeType::CodeA, BarcodeType::CodeB, BarcodeType::CodeC] {
-            if let Some(builder) = map.get(&(text, ty)) {
-                let options = builder.create_child_options();
-                for option in options {
-                    if let Some(c) = map.get(&(option.remaining, option.set)) {
-                        if c.cost() > option.cost() {
-                            map.insert((option.remaining, option.set), option);
+            for fnc_state in [false, true] {
+                if let Some(builder) = map.get(&(text, ty, fnc_state)) {
+                    let options = builder.create_child_options();
+                    for option in options {
+                        if let Some(c) = map.get(&(option.remaining, option.set, option.fnc4)) {
+                            if c.cost() > option.cost() {
+                                map.insert((option.remaining, option.set, option.fnc4), option);
+                            }
+                        } else {
+                            map.insert((option.remaining, option.set, option.fnc4), option);
                         }
-                    } else {
-                        map.insert((option.remaining, option.set), option);
                     }
                 }
             }
         }
-        text = &text[1..];
+        text = &text[next_char..];
     }
 
     map.into_iter()
-        .filter_map(|((k, _), v)| if k.is_empty() { Some(v.build()) } else { None })
+        .filter_map(|((k, _, _), v)| if k.is_empty() { Some(v.build()) } else { None })
         .min_by_key(|v| v.code.len())
 }
 
@@ -614,16 +636,46 @@ struct BarcodeBuilder<'table, 's> {
     code: Vec<&'table TableEntry>,
     remaining: &'s str,
     set: BarcodeType,
+    fnc4: bool,
 }
 
 impl<'table, 's> BarcodeBuilder<'table, 's> {
-    fn new(table: &'table Table, code: &'s str) -> Self {
-        Self {
-            table,
-            code: Vec::new(),
-            remaining: code,
-            set: BarcodeType::CodeA,
-        }
+    fn new(table: &'table Table, code: &'s str) -> [BarcodeBuilder<'table, 's>; 3] {
+        [
+            Self {
+                code: vec![
+                    table
+                        .entry_in_set(BarcodeValue::StartA, BarcodeType::CodeA)
+                        .unwrap(),
+                ],
+                set: BarcodeType::CodeA,
+                remaining: code,
+                table,
+                fnc4: false,
+            },
+            Self {
+                code: vec![
+                    table
+                        .entry_in_set(BarcodeValue::StartB, BarcodeType::CodeB)
+                        .unwrap(),
+                ],
+                set: BarcodeType::CodeB,
+                remaining: code,
+                table,
+                fnc4: false,
+            },
+            Self {
+                code: vec![
+                    table
+                        .entry_in_set(BarcodeValue::StartC, BarcodeType::CodeC)
+                        .unwrap(),
+                ],
+                set: BarcodeType::CodeC,
+                remaining: code,
+                table,
+                fnc4: false,
+            },
+        ]
     }
 
     fn cost(&self) -> usize {
@@ -631,43 +683,12 @@ impl<'table, 's> BarcodeBuilder<'table, 's> {
     }
 
     fn create_child_options(&self) -> Vec<Self> {
-        if self.code.is_empty() {
-            return vec![
-                Self {
-                    code: vec![
-                        self.table
-                            .entry_in_set(BarcodeValue::StartA, BarcodeType::CodeA)
-                            .unwrap(),
-                    ],
-                    ..self.clone()
-                },
-                Self {
-                    code: vec![
-                        self.table
-                            .entry_in_set(BarcodeValue::StartB, BarcodeType::CodeB)
-                            .unwrap(),
-                    ],
-                    set: BarcodeType::CodeB,
-                    ..self.clone()
-                },
-                Self {
-                    code: vec![
-                        self.table
-                            .entry_in_set(BarcodeValue::StartC, BarcodeType::CodeC)
-                            .unwrap(),
-                    ],
-                    set: BarcodeType::CodeC,
-                    ..self.clone()
-                },
-            ];
-        }
         let mut options = Vec::new();
         let old_set = self.set;
 
         // try to see if set C works, always two numbers
-
         if self.remaining.len() >= 2 {
-            let first_two_characters = &self.remaining[..2];
+            let first_two_characters = self.remaining.chars().take(2).collect::<String>();
             if first_two_characters.chars().all(|c| c.is_ascii_digit()) {
                 if let Ok(v) = first_two_characters.parse::<u8>() {
                     if let Some(s) = self.try_push(|mut s| {
@@ -676,7 +697,8 @@ impl<'table, 's> BarcodeBuilder<'table, 's> {
                             s.set = BarcodeType::CodeC;
                         }
                         s.code.push(s.in_set(v)?);
-                        s.remaining = &s.remaining[2..];
+
+                        s.remaining = &s.remaining[first_two_characters.len()..];
                         Some(s)
                     }) {
                         options.push(s)
@@ -695,8 +717,31 @@ impl<'table, 's> BarcodeBuilder<'table, 's> {
             }) {
                 options.push(s);
             }
-            // shift A or B?
-            for new_set in [BarcodeType::CodeA, BarcodeType::CodeB] {
+
+            // FNC4 support
+            if let Some(s) = self.try_push(|mut s| {
+                s.code.push(s.in_set(BarcodeValue::FNC4)?);
+                s.fnc4 = !s.fnc4;
+                s.code.push(s.in_set(fc)?);
+                s.fnc4 = !s.fnc4;
+                s.remaining = &s.remaining[fc.len_utf8()..];
+                Some(s)
+            }) {
+                options.push(s);
+            }
+            if let Some(s) = self.try_push(|mut s| {
+                s.code.push(s.in_set(BarcodeValue::FNC4)?);
+                s.code.push(s.in_set(BarcodeValue::FNC4)?);
+                s.fnc4 = !s.fnc4;
+                s.code.push(s.in_set(fc)?);
+                s.remaining = &s.remaining[fc.len_utf8()..];
+                Some(s)
+            }) {
+                options.push(s);
+            }
+
+            // For A it's B and for B it's A, not like you can switch from A to A...
+            if let Some(new_set) = old_set.other_set() {
                 let shift_to = match new_set {
                     BarcodeType::CodeA => BarcodeValue::ShiftA,
                     BarcodeType::CodeB => BarcodeValue::ShiftB,
@@ -739,6 +784,14 @@ impl<'table, 's> BarcodeBuilder<'table, 's> {
     }
 
     fn in_set(&self, v: impl Into<BarcodeValue>) -> Option<&'table TableEntry> {
+        let v = v.into();
+        if self.fnc4 {
+            if let BarcodeValue::RegularCharacter(c) = v {
+                let c = (c as u32).checked_sub(128)?;
+                let c = char::from_u32(c)?;
+                return self.table.entry_in_set(c, self.set);
+            }
+        }
         self.table.entry_in_set(v, self.set)
     }
 
