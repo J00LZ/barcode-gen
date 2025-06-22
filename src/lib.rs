@@ -1,5 +1,7 @@
 #![warn(missing_docs)]
-//! A Code 128 barcode generator
+//! A simple Code128 barcode generator
+//! 
+//! Currently supports all features of Code 128 except FNC4 (the code use to allow encoding Latin-1 completely).
 
 use std::{
     collections::{HashMap, VecDeque},
