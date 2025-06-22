@@ -5,3 +5,5 @@ edition = "2024"
 description = "A simple Code128 barcode generator"
 license = "MIT"
 repository = "https://github.com/J00LZ/barcode-gen"
+keywords = ["code128", "encoder", "barcode"]
+categories = ["encoding"]
