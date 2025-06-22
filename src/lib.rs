@@ -1,3 +1,6 @@
+#![warn(missing_docs)]
+//! A Code 128 barcode generator
+
 use std::{
     collections::{HashMap, VecDeque},
     fmt::Display,
@@ -7,8 +10,11 @@ use std::{
 /// The different barcode types, used to keep track of the type used in the encoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BarcodeType {
+    /// Code 128 variant A, uppper case characters and control characters
     CodeA,
+    /// Code 128 variant B, upper and lower case characters
     CodeB,
+    /// Code 128 variant C, two digit numbers
     CodeC,
 }
 
@@ -16,20 +22,35 @@ pub enum BarcodeType {
 /// digits for Code C, and control codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BarcodeValue {
+    /// A regular character, also includes control characters. 
     RegularCharacter(char),
+    /// A Code C digit, the numbers 0 through 9 are actually 00 through 09. 
     Digit(u8),
+    /// Used to indicate a GS1-128 barcode
     FNC1,
+    /// Indicates that the currently scanned string should be prepended to the next scan
     FNC2,
+    /// Initialize, used for programming scanners
     FNC3,
+    /// Used for extended ASCII support, currently not available in this crate
     FNC4,
+    /// The code used to signal we start in variant A
     StartA,
+    /// The code used to signal we start in variant B
     StartB,
+    /// The code used to signal we start in variant C
     StartC,
+    /// Not actually the stop code, just the one used at the end. 
     Stop,
+    /// Use variant A for the next character
     ShiftA,
+    /// Use variant B for the next character
     ShiftB,
+    /// Switch to variant A from here on out
     CodeA,
+    /// Switch to variant B from here on out
     CodeB,
+    /// Switch to variant C from here on out
     CodeC,
 }
 
