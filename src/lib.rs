@@ -83,9 +83,12 @@ impl From<u8> for BarcodeValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TableEntry {
     value: u8,
-    a: BarcodeValue,
-    b: BarcodeValue,
-    c: BarcodeValue,
+    /// The value with Barcode Set A selected
+    pub a: BarcodeValue,
+    /// The value with Barcode Set B selected
+    pub b: BarcodeValue,
+    /// The value with Barcode Set C selected
+    pub c: BarcodeValue,
     latin: char,
 }
 
@@ -499,10 +502,6 @@ pub struct Barcode<'table> {
     code: Vec<&'table TableEntry>,
 }
 
-impl<'table> Barcode<'table> {
-    
-}
-
 impl PartialOrd for Barcode<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
@@ -538,16 +537,22 @@ impl<'table> IntoIterator for Barcode<'table> {
 /// const value of the most common table.
 pub const TABLE: Table = Table::new();
 
-/// Make a barcode with the fastest available method, currently uses [`make_barcode_custom_table_dp`].
+/// Make a barcode with the fastest available method, currently uses [`make_barcode_custom_table`].
 pub fn make_barcode(text: &str) -> Option<Barcode<'_>> {
-    make_barcode_custom_table_dp(&TABLE, text)
+    make_barcode_prefer_set(text, BarcodeType::CodeB)
+}
+
+/// Makes a barcode with the fastest available method, prefering a specific codeset if both are equal.
+pub fn make_barcode_prefer_set(text: &str, prefer: BarcodeType) -> Option<Barcode<'_>> {
+    make_barcode_custom_table(&TABLE, text, prefer)
 }
 
 /// Find a barcode using dynamic programming. It's very fast.
 /// For the table parameter you can use [`TABLE`], it's the default table.
-pub fn make_barcode_custom_table_dp<'table>(
+pub fn make_barcode_custom_table<'table>(
     table: &'table Table,
     mut text: &str,
+    prefer: BarcodeType,
 ) -> Option<Barcode<'table>> {
     let mut map = HashMap::new();
     for c in BarcodeBuilder::new(table, text) {
@@ -560,14 +565,17 @@ pub fn make_barcode_custom_table_dp<'table>(
             for fnc_state in [false, true] {
                 if let Some(builder) = map.get(&BarcodeKey::new(text, ty).with_fnc(fnc_state)) {
                     let options = builder.create_child_options();
-                    for option in options {
-                        let key = option.key();
-                        if let Some(c) = map.get(&key) {
-                            if c.cost() > option.cost() {
-                                map.insert(key, option);
+                    for current in options {
+                        let key = current.key();
+                        if let Some(previous) = map.get(&key) {
+                            let prev_cost = previous.cost();
+                            let curr_cost = current.cost();
+                            if prev_cost > curr_cost || key.set == prefer && prev_cost == curr_cost
+                            {
+                                map.insert(key, current);
                             }
                         } else {
-                            map.insert(key, option);
+                            map.insert(key, current);
                         }
                     }
                 }
