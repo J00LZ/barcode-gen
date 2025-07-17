@@ -502,57 +502,6 @@ pub struct Barcode<'table> {
     code: Vec<&'table TableEntry>,
 }
 
-/// A barcode that has been owned, useful for returning barcodes from functions.
-#[derive(Debug, PartialEq, Eq)]
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
-pub struct OwnedBarcode {
-    code: Vec<TableEntry>,
-}
-
-impl Display for OwnedBarcode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let b: Barcode<'_> = self.into();
-        write!(f, "{b}")
-    }
-}
-
-impl IntoIterator for OwnedBarcode {
-    type Item = TableEntry;
-
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.code.into_iter()
-    }
-}
-
-impl From<Barcode<'_>> for OwnedBarcode {
-    fn from(value: Barcode<'_>) -> Self {
-        OwnedBarcode {
-            code: value.code.into_iter().map(|e| *e).collect(),
-        }
-    }
-}
-
-impl<'b> From<&'b OwnedBarcode> for Barcode<'b> {
-    fn from(value: &'b OwnedBarcode) -> Self {
-        Barcode {
-            code: value.code.iter().map(|e| e).collect(),
-        }
-    }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
-impl OwnedBarcode {
-    /// Convert the owned barcode to a string.
-    pub fn to_string(&self) -> String {
-        self.code
-            .iter()
-            .map(|e| e.latin())
-            .collect::<String>()
-    }
-}
-
 impl PartialOrd for Barcode<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
@@ -588,10 +537,10 @@ impl<'table> IntoIterator for Barcode<'table> {
 /// const value of the most common table.
 pub const TABLE: Table = Table::new();
 
-/// Make an owned barcode with the fastest available method
+/// Generate a barcode as a string.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen)]
-pub fn make_owned_barcode(text: &str) -> Option<OwnedBarcode> {
-    make_barcode(text).map(|b| b.into())
+pub fn make_barcode_string(text: &str) -> Option<String> {
+    make_barcode(text).map(|b| b.to_string())
 }
 
 /// Make a barcode with the fastest available method
